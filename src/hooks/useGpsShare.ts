@@ -104,6 +104,8 @@ function useGpsShareState() {
   const [contributors, setContributors] = useState(0);
   const [endResult, setEndResult] = useState<EndResult | null>(null);
   const [backgrounded, setBackgrounded] = useState(false);
+  // True logo após o app voltar ao primeiro plano, enquanto aguarda a próxima confirmação do servidor.
+  const [resuming, setResuming] = useState(false);
 
   const creds = useRef<VisitorCreds | null>(null);
   const watchId = useRef<number | null>(null);
@@ -121,6 +123,8 @@ function useGpsShareState() {
   const lastAckRef = useRef<number | null>(null);
   const wakeLock = useRef<{ release: () => Promise<void> } | null>(null);
   const sending = useRef(false);
+  const resumeUntil = useRef(0);
+  const resumeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const cleanup = useCallback(() => {
     if (nativeMode.current) sendNativeCommand(STOP_GPS);
@@ -135,6 +139,10 @@ function useGpsShareState() {
     timer.current = null;
     wakeLock.current?.release().catch(() => {});
     wakeLock.current = null;
+    if (resumeTimer.current) clearTimeout(resumeTimer.current);
+    resumeTimer.current = null;
+    resumeUntil.current = 0;
+    setResuming(false);
     session.current = null;
     clearSessionId();
   }, []);
@@ -158,7 +166,11 @@ function useGpsShareState() {
     if (!s || !c || sending.current) return;
     const timeoutMs = s.timeout_s * 1000;
     // Honest status: if no confirmed update within the timeout, it's not active.
-    if (lastAckRef.current && Date.now() - lastAckRef.current > timeoutMs) setStatus("paused");
+    // Ao voltar do segundo plano as confirmações do App Inventor não chegavam (a tela estava parada),
+    // então não marcamos "pausado" durante a janela de retomada.
+    const resumingNow = Date.now() < resumeUntil.current;
+    if (lastAckRef.current && Date.now() - lastAckRef.current > timeoutMs && !resumingNow)
+      setStatus("paused");
     // Web1 takes ownership only after its first valid response. Never duplicate its writes.
     if (nativeMode.current && nativeRpcActive.current) return;
     if (!pos || Date.now() - pos.timestamp > s.update_interval_s * 3000) return; // no fresh fix
@@ -355,6 +367,10 @@ function useGpsShareState() {
         }
         if (result.reason === "RATE_LIMIT") return;
         nativeRpcActive.current = true;
+        resumeUntil.current = 0;
+        if (resumeTimer.current) clearTimeout(resumeTimer.current);
+        resumeTimer.current = null;
+        setResuming(false);
         lastAckRef.current = result.timestamp;
         setLastAck(result.timestamp);
         setLastReject(result.accepted ? null : result.reason);
@@ -390,10 +406,23 @@ function useGpsShareState() {
 
   // Background / visibility / connectivity handling
   useEffect(() => {
+    const startResume = () => {
+      const s = session.current;
+      if (!s || !nativeMode.current) return;
+      const graceMs = Math.max(30, s.update_interval_s * 3 + 5) * 1000;
+      resumeUntil.current = Date.now() + graceMs;
+      setResuming(true);
+      if (resumeTimer.current) clearTimeout(resumeTimer.current);
+      resumeTimer.current = setTimeout(() => {
+        resumeTimer.current = null;
+        setResuming(false);
+      }, graceMs);
+    };
     const onVis = () => {
       const hidden = document.visibilityState === "hidden";
       setBackgrounded(hidden);
       if (!hidden && session.current) {
+        startResume();
         requestWakeLock();
         send();
       }
@@ -449,6 +478,7 @@ function useGpsShareState() {
     contributors,
     endResult,
     backgrounded,
+    resuming,
     begin,
     stop,
     reset,
