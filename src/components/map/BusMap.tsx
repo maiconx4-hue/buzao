@@ -31,6 +31,10 @@ type Props = {
   onSelectRoute: (id: string) => void;
   fitRoute?: { id: string; key: number } | null;
   onMapClick?: () => void;
+  /** Linha a desenhar mesmo sem filtro de linha (ex.: ao seguir um ônibus). */
+  lineRouteId?: string | null;
+  /** Áreas cobertas por painéis (px): o mapa centraliza o ônibus na parte visível. */
+  insets?: { top: number; bottom: number };
 };
 
 export default function BusMap({
@@ -44,7 +48,11 @@ export default function BusMap({
   onSelectRoute,
   fitRoute = null,
   onMapClick,
+  lineRouteId = null,
+  insets,
 }: Props) {
+  const topInset = insets?.top ?? 0;
+  const bottomInset = insets?.bottom ?? 0;
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
   const routeLayer = useRef<L.LayerGroup | null>(null);
@@ -92,15 +100,16 @@ export default function BusMap({
     const layer = routeLayer.current;
     if (!layer) return;
     layer.clearLayers();
-    // Lines stay hidden until the user picks one.
+    // A linha aparece quando o usuário escolhe uma linha ou segue um ônibus dela.
+    const activeLineId = lineRouteId ?? selectedRouteId;
     routes.forEach((r) => {
-      if (r.id !== selectedRouteId) return;
+      if (r.id !== activeLineId) return;
       if (!isLatLngArray(r.geometry) || r.geometry.length < 2) return;
       L.polyline(r.geometry, { color: r.color, weight: 6, opacity: 0.85 })
         .on("click", () => cb.current.onSelectRoute(r.id))
         .addTo(layer);
     });
-  }, [routes, selectedRouteId]);
+  }, [routes, selectedRouteId, lineRouteId]);
 
   useEffect(() => {
     const layer = groupLayer.current;
@@ -153,7 +162,16 @@ export default function BusMap({
     if (!fitRoute || !map.current) return;
     const r = routes.find((x) => x.id === fitRoute.id);
     if (r && isLatLngArray(r.geometry) && r.geometry.length >= 2)
-      map.current.flyToBounds(L.latLngBounds(r.geometry), { padding: [40, 140], duration: 0.8 });
+      map.current.flyToBounds(
+        L.latLngBounds(r.geometry),
+        insets
+          ? {
+              paddingTopLeft: [40, topInset + 16],
+              paddingBottomRight: [40, bottomInset + 16],
+              duration: 0.8,
+            }
+          : { padding: [40, 140], duration: 0.8 },
+      );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitRoute]);
 
@@ -172,13 +190,36 @@ export default function BusMap({
   }, []);
   const lat = followed?.lat;
   const lng = followed?.lng;
+  // Deslocamento vertical para o ônibus ficar na parte visível (entre o topo e o painel de baixo).
+  const offsetY = Math.round((bottomInset - topInset) / 2);
   useEffect(() => {
     const m = map.current;
     if (!m || paused || lat == null || lng == null) return;
     const zoom = Math.max(m.getZoom(), 16);
-    if (zoom !== m.getZoom()) m.setView([lat, lng], zoom, { animate: true });
-    else m.panTo([lat, lng], { animate: true, duration: 0.8 });
-  }, [lat, lng, paused]);
+    const limit = m.getSize().y / 3;
+    const dy = Math.max(-limit, Math.min(limit, offsetY));
+    const p = m.project([lat, lng], zoom);
+    const target = m.unproject(L.point(p.x, p.y + dy), zoom);
+    if (zoom !== m.getZoom()) m.setView(target, zoom, { animate: true });
+    else m.panTo(target, { animate: true, duration: 0.8 });
+  }, [lat, lng, paused, offsetY]);
+
+  const lineId = lineRouteId ?? selectedRouteId;
+  const lineRoute = lineId ? routes.find((x) => x.id === lineId) : undefined;
+  const lineGeometry =
+    lineRoute && isLatLngArray(lineRoute.geometry) && lineRoute.geometry.length >= 2
+      ? lineRoute.geometry
+      : null;
+  const showWholeRoute = () => {
+    const m = map.current;
+    if (!m || !lineGeometry) return;
+    setPaused(true);
+    m.flyToBounds(L.latLngBounds(lineGeometry), {
+      paddingTopLeft: [40, topInset + 16],
+      paddingBottomRight: [40, bottomInset + 16],
+      duration: 0.8,
+    });
+  };
 
   return (
     <>
@@ -193,8 +234,19 @@ export default function BusMap({
         </button>
       )}
       {followed && !paused && (
-        <div className="pointer-events-none absolute left-1/2 top-28 z-[500] -translate-x-1/2 rounded-full bg-card/95 px-3 py-1 text-xs font-semibold text-foreground shadow">
-          Seguindo ônibus {followed.code}
+        <div className="absolute left-1/2 top-28 z-[500] flex -translate-x-1/2 items-center gap-2">
+          <span className="pointer-events-none rounded-full bg-card/95 px-3 py-1 text-xs font-semibold text-foreground shadow">
+            Seguindo ônibus {followed.code}
+          </span>
+          {lineGeometry && (
+            <button
+              type="button"
+              onClick={showWholeRoute}
+              className="rounded-full bg-card/95 px-3 py-1 text-xs font-semibold text-primary shadow"
+            >
+              Ver linha toda
+            </button>
+          )}
         </div>
       )}
     </>
