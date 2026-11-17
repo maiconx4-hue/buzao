@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { ClientOnly, Link, createFileRoute } from "@tanstack/react-router";
-import { Bus, ChevronDown, ChevronUp, Crosshair, Info, LocateFixed, Radio, Settings, Square, User, X } from "lucide-react";
+import { Bus, ChevronDown, ChevronUp, Clock, Crosshair, Info, LocateFixed, Radio, Settings, ShieldCheck, Signal, Square, User, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useMapData, type BusGroup } from "@/hooks/useMapData";
 import { useGpsShare } from "@/hooks/useGpsShare";
@@ -44,10 +44,27 @@ const MATCH_TEXT: Record<string, string> = {
     "Sua posição não é compatível com a última posição conhecida. Iniciamos um acompanhamento independente.",
 };
 
+function useBoxHeight<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => setHeight(Math.round(el.getBoundingClientRect().height));
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, height] as const;
+}
+
 function Index() {
   const { routes, groups, settings, loading, error, live } = useMapData();
   const { user, isAdmin } = useAuth();
   const share = useGpsShare();
+  const [headerRef, headerH] = useBoxHeight<HTMLElement>();
+  const [sheetRef, sheetH] = useBoxHeight<HTMLElement>();
   const [routeFilter, setRouteFilter] = useState<string | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const [selectedRoute, setSelectedRoute] = useState<string | null>(null);
@@ -84,6 +101,10 @@ function Index() {
   }, [sharing]);
 
   const group = visibleGroups.find((g) => g.id === selectedGroup) ?? null;
+  const followedId = selectedGroup ?? (sharing ? (share.start?.group_id ?? null) : null);
+  const followedGroup = visibleGroups.find((g) => g.id === followedId) ?? null;
+  // Ao seguir um ônibus, a linha dele aparece mesmo sem escolher a linha no filtro.
+  const lineRouteId = routeFilter ?? followedGroup?.route_id ?? null;
   const routeDetail = routeById.get(selectedRoute ?? "") ?? null;
 
   const locate = () => {
@@ -144,7 +165,9 @@ function Index() {
             focus={focus}
             fitRoute={fitRoute}
             onMapClick={() => setNameTip(null)}
-            followId={selectedGroup ?? (sharing ? (share.start?.group_id ?? null) : null)}
+            followId={followedId}
+            lineRouteId={lineRouteId}
+            insets={{ top: headerH, bottom: sheetH }}
             onSelectGroup={(id) => {
               setSelectedGroup(id);
               setSelectedRoute(null);
@@ -159,6 +182,7 @@ function Index() {
 
       {/* Top bar */}
       <header
+        ref={headerRef}
         className="pointer-events-none absolute inset-x-0 top-0 z-[500] space-y-2 p-3"
         style={{ background: "var(--gradient-header)" }}
       >
@@ -253,8 +277,10 @@ function Index() {
       </header>
 
       {/* Bottom sheet */}
-      <section className="absolute inset-x-0 bottom-0 z-[500] mx-auto max-w-lg p-3">
-        <div className="space-y-3 rounded-3xl bg-card p-4 shadow-[var(--shadow-sheet)]">
+      <section ref={sheetRef} className="absolute inset-x-0 bottom-0 z-[500] mx-auto max-w-lg p-3">
+        <div
+          className={`rounded-3xl bg-card shadow-[var(--shadow-sheet)] ${!sharing && group ? "space-y-2 p-3" : "space-y-3 p-4"}`}
+        >
           {sharing ? (
             shareExpanded ? (
               <>
@@ -290,6 +316,7 @@ function Index() {
             )
           ) : group ? (
             <GroupPanel
+              key={group.id}
               group={group}
               route={routeById.get(group.route_id)!}
               timeout={timeout}
@@ -485,83 +512,116 @@ function GroupPanel({
   onClose: () => void;
   onHelp: () => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const live = group.state === "ativo";
   const ageS = (Date.now() - new Date(group.last_update).getTime()) / 1000;
+  const freshTone = ageS <= timeout / 2 ? "good" : ageS <= timeout ? "mid" : "bad";
+  const signalTone = !live
+    ? "bad"
+    : group.signal === "bom"
+      ? "good"
+      : group.signal === "moderado"
+        ? "mid"
+        : "bad";
+  const confTone = !live
+    ? "neutral"
+    : group.confidence === "alta"
+      ? "good"
+      : group.confidence === "media"
+        ? "mid"
+        : "bad";
+  const toneText = {
+    good: "text-live",
+    mid: "text-warn",
+    bad: "text-destructive",
+    neutral: "text-muted-foreground",
+  } as const;
+  const helpLabel = live
+    ? group.active_contributors < max
+      ? "Estou neste ônibus — contribuir"
+      : null
+    : "Ajudar a atualizar esta localização";
   return (
-    <div className="space-y-3">
-      <div className="flex items-start gap-3">
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
         <span
-          className="grid h-10 min-w-10 place-items-center rounded-xl px-2 text-sm font-bold text-primary-foreground"
+          className="grid h-8 min-w-8 place-items-center rounded-lg px-2 text-xs font-bold text-primary-foreground"
           style={{ background: route.color }}
         >
           {route.code}
         </span>
-        <div className="flex-1">
-          <h2 className="font-bold">{route.name}</h2>
-          <p className={`text-xs font-semibold ${live ? "text-live" : "text-muted-foreground"}`}>
+        <div className="min-w-0 flex-1">
+          <h2 className="truncate text-sm font-bold leading-tight">{route.name}</h2>
+          <p className={`truncate text-xs font-semibold ${live ? "text-live" : "text-muted-foreground"}`}>
             {live
               ? `Ativo · ${group.active_contributors} de ${max} colaboradores`
               : `Desatualizado · última posição ${formatAge(group.last_update)} (${new Date(group.last_update).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })})`}
           </p>
         </div>
-        <Button size="icon" variant="ghost" onClick={onClose} aria-label="Fechar">
+        <Button size="icon" variant="ghost" className="size-8" onClick={onClose} aria-label="Fechar">
           <X />
         </Button>
       </div>
-      <IndicatorGrid
-        experience={{
-          label: "Experiência",
-          value: live ? levelLabel(group.top_level) : "—",
-          hint: "Nível não garante a precisão da posição.",
-        }}
-        freshness={{
-          label: "Atualidade",
-          value: formatAge(group.last_update),
-          tone: ageS <= timeout / 2 ? "good" : ageS <= timeout ? "mid" : "bad",
-        }}
-        signal={{
-          label: "Sinal",
-          value: live ? `${group.signal} · ±${Math.round(group.accuracy_m)} m` : "sem sinal",
-          tone: !live
-            ? "bad"
-            : group.signal === "bom"
-              ? "good"
-              : group.signal === "moderado"
-                ? "mid"
-                : "bad",
-          hint:
-            live && group.divergence_m > 50
-              ? `Colaboradores divergem ${Math.round(group.divergence_m)} m — posição incerta.`
-              : undefined,
-        }}
-        validation={{
-          label: "Validação",
-          value: live ? `confiança ${group.confidence}` : "aguardando dados",
-          tone: !live
-            ? "neutral"
-            : group.confidence === "alta"
-              ? "good"
-              : group.confidence === "media"
-                ? "mid"
-                : "bad",
-          hint: "Área, precisão e velocidade verificadas no servidor.",
-        }}
-      />
-      {live ? (
-        group.active_contributors < max ? (
-          <Button variant="bus" className="w-full" onClick={onHelp}>
-            Estou neste ônibus — quero contribuir
+      {expanded ? (
+        <IndicatorGrid
+          experience={{
+            label: "Experiência",
+            value: live ? levelLabel(group.top_level) : "—",
+            hint: "Nível não garante a precisão da posição.",
+          }}
+          freshness={{ label: "Atualidade", value: formatAge(group.last_update), tone: freshTone }}
+          signal={{
+            label: "Sinal",
+            value: live ? `${group.signal} · ±${Math.round(group.accuracy_m)} m` : "sem sinal",
+            tone: signalTone,
+            hint:
+              live && group.divergence_m > 50
+                ? `Colaboradores divergem ${Math.round(group.divergence_m)} m — posição incerta.`
+                : undefined,
+          }}
+          validation={{
+            label: "Validação",
+            value: live ? `confiança ${group.confidence}` : "aguardando dados",
+            tone: confTone,
+            hint: "Área, precisão e velocidade verificadas no servidor.",
+          }}
+        />
+      ) : (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold">
+          <span className={`inline-flex items-center gap-1 ${toneText[freshTone]}`}>
+            <Clock className="size-3.5" /> {formatAge(group.last_update)}
+          </span>
+          <span className={`inline-flex items-center gap-1 ${toneText[signalTone]}`}>
+            <Signal className="size-3.5" />
+            {live ? `${group.signal} · ±${Math.round(group.accuracy_m)} m` : "sem sinal"}
+          </span>
+          <span className={`inline-flex items-center gap-1 ${toneText[confTone]}`}>
+            <ShieldCheck className="size-3.5" />
+            {live ? `confiança ${group.confidence}` : "aguardando dados"}
+          </span>
+        </div>
+      )}
+      <div className="flex items-center gap-2">
+        {helpLabel ? (
+          <Button variant="bus" className="h-10 flex-1 text-sm" onClick={onHelp}>
+            {helpLabel}
           </Button>
         ) : (
-          <p className="text-center text-xs text-muted-foreground">
+          <p className="flex-1 text-xs text-muted-foreground">
             Este ônibus já tem o máximo de colaboradores.
           </p>
-        )
-      ) : (
-        <Button variant="bus" className="w-full" onClick={onHelp}>
-          Ajudar a atualizar esta localização
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-10 shrink-0 px-2 text-xs text-muted-foreground"
+          onClick={() => setExpanded((v) => !v)}
+          aria-label={expanded ? "Recolher detalhes" : "Ver detalhes"}
+        >
+          {expanded ? <ChevronDown className="size-4" /> : <ChevronUp className="size-4" />}
+          Detalhes
         </Button>
-      )}
+      </div>
     </div>
   );
 }
@@ -600,9 +660,13 @@ function SharePanel({
   timeout: number;
 }) {
   const ack = share.lastAck ? Math.round((Date.now() - share.lastAck) / 1000) : null;
-  const isActive = share.status === "active" && ack !== null && ack <= timeout;
+  const staleAck = ack === null || ack > timeout;
+  const resuming = share.resuming && share.status === "active" && staleAck;
+  const isActive = share.status === "active" && !staleAck;
   const label =
-    share.status === "locating"
+    resuming
+      ? "Retomando atualizações…"
+      : share.status === "locating"
       ? "Obtendo sinal do GPS…"
       : share.status === "starting"
         ? "Iniciando sessão…"
@@ -622,7 +686,11 @@ function SharePanel({
         <div className="flex-1">
           <h2 className="font-bold">{label}</h2>
           <p className="text-xs text-muted-foreground">
-            {ack !== null ? `Último envio confirmado ${ack}s atrás` : "—"}
+            {resuming
+              ? "Aguardando a confirmação do servidor"
+              : ack !== null
+                ? `Último envio confirmado ${ack}s atrás`
+                : "—"}
             {share.accuracy ? ` · precisão ±${Math.round(share.accuracy)} m` : ""}
             {share.contributors ? ` · ${share.contributors} no grupo` : ""}
           </p>
