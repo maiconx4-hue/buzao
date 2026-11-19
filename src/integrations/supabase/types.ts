@@ -377,6 +377,71 @@ export type Database = {
         }
         Relationships: []
       }
+      route_imports: {
+        Row: {
+          direction: string
+          geometry_origin: string
+          id: string
+          import_key: string
+          imported_at: string
+          imported_by: string | null
+          line_code: string
+          operator: string
+          route_id: string
+          segments: Json
+          source: string
+          source_url: string | null
+          stops: Json
+          updated_at: string
+          validation: string
+          warnings: Json
+        }
+        Insert: {
+          direction: string
+          geometry_origin?: string
+          id?: string
+          import_key: string
+          imported_at?: string
+          imported_by?: string | null
+          line_code: string
+          operator?: string
+          route_id: string
+          segments?: Json
+          source: string
+          source_url?: string | null
+          stops?: Json
+          updated_at?: string
+          validation?: string
+          warnings?: Json
+        }
+        Update: {
+          direction?: string
+          geometry_origin?: string
+          id?: string
+          import_key?: string
+          imported_at?: string
+          imported_by?: string | null
+          line_code?: string
+          operator?: string
+          route_id?: string
+          segments?: Json
+          source?: string
+          source_url?: string | null
+          stops?: Json
+          updated_at?: string
+          validation?: string
+          warnings?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "route_imports_route_id_fkey"
+            columns: ["route_id"]
+            isOneToOne: true
+            referencedRelation: "routes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       routes: {
         Row: {
           code: string
@@ -537,6 +602,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      admin_save_route_import: { Args: { p: Json }; Returns: Json }
       admin_stats: { Args: never; Returns: Json }
       award_achievements: { Args: { p_user: string }; Returns: undefined }
       claim_visitor: {

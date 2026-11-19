@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Lock, Plus } from "lucide-react";
+import { ArrowLeft, Lock, Plus, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RouteEditor } from "@/components/admin/RouteEditor";
+import { RouteImporter } from "@/components/admin/RouteImporter";
+import { SOURCE_LABELS, type SourceKind } from "@/lib/routeImport/types";
 import { formatDistance } from "@/lib/geo";
 import { friendlyError } from "@/lib/errors";
 
@@ -77,6 +79,7 @@ function Admin() {
 function AdminPanel() {
   const qc = useQueryClient();
   const [editing, setEditing] = useState<RouteRow | "new" | null>(null);
+  const [importing, setImporting] = useState(false);
   const stats = useQuery({
     queryKey: ["admin-stats"],
     queryFn: async () => {
@@ -93,6 +96,15 @@ function AdminPanel() {
       if (error) throw error;
       return data;
     },
+  });
+  const imports = useQuery({
+    queryKey: ["admin-imports"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("route_imports").select("route_id,source,validation");
+      if (error) throw error;
+      return new Map(data.map((i) => [i.route_id, i]));
+    },
+    retry: false,
   });
   const settings = useQuery({
     queryKey: ["admin-settings"],
@@ -114,10 +126,27 @@ function AdminPanel() {
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["admin-routes"] });
+    qc.invalidateQueries({ queryKey: ["admin-imports"] });
     qc.invalidateQueries({ queryKey: ["admin-stats"] });
     qc.invalidateQueries({ queryKey: ["public-routes"] });
   };
+  const openEditorFor = async (routeId: string) => {
+    const { data, error } = await supabase.from("routes").select("*").eq("id", routeId).single();
+    if (error || !data) {
+      toast.error(error?.message ?? "Rota não encontrada.");
+      return;
+    }
+    setImporting(false);
+    setEditing(data);
+  };
   const setStatus = async (r: RouteRow, status: RouteRow["status"]) => {
+    const imp = imports.data?.get(r.id);
+    if (
+      status === "published" &&
+      imp?.validation === "pendente" &&
+      !confirm(`A rota ${r.code} foi importada e ainda não foi marcada como revisada. Publicar mesmo assim?`)
+    )
+      return;
     const { error } = await supabase.from("routes").update({ status }).eq("id", r.id);
     if (error) {
       toast.error(error.message);
@@ -195,7 +224,16 @@ function AdminPanel() {
         </TabsContent>
 
         <TabsContent value="rotas" className="space-y-4">
-          {editing ? (
+          {importing ? (
+            <RouteImporter
+              onClose={() => {
+                setImporting(false);
+                refresh();
+              }}
+              onSaved={refresh}
+              onOpenEditor={openEditorFor}
+            />
+          ) : editing ? (
             <RouteEditor
               key={editing === "new" ? "new" : editing.id}
               initial={editing === "new" ? null : editing}
@@ -206,9 +244,14 @@ function AdminPanel() {
             />
           ) : (
             <>
-              <Button onClick={() => setEditing("new")}>
-                <Plus /> Nova rota
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={() => setEditing("new")}>
+                  <Plus /> Nova rota
+                </Button>
+                <Button variant="outline" onClick={() => setImporting(true)}>
+                  <Upload /> Importar rota
+                </Button>
+              </div>
               {routes.data?.length === 0 && (
                 <p className="text-sm text-muted-foreground">Nenhuma rota cadastrada.</p>
               )}
@@ -227,6 +270,8 @@ function AdminPanel() {
                         {STATUS_PT[r.status]} · {formatDistance(r.distance_m)} ·{" "}
                         {r.creation_method === "osrm" ? "OSRM" : "manual"} · atualizada{" "}
                         {new Date(r.updated_at).toLocaleDateString("pt-BR")}
+                        {imports.data?.get(r.id) &&
+                          ` · importada (${SOURCE_LABELS[imports.data.get(r.id)!.source as SourceKind] ?? imports.data.get(r.id)!.source}) · revisão ${imports.data.get(r.id)!.validation}`}
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-1">
