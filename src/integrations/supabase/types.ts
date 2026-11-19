@@ -436,7 +436,7 @@ export type Database = {
           {
             foreignKeyName: "route_imports_route_id_fkey"
             columns: ["route_id"]
-            isOneToOne: true
+            isOneToOne: false
             referencedRelation: "routes"
             referencedColumns: ["id"]
           },
