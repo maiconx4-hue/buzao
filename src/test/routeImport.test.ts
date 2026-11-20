@@ -10,6 +10,7 @@ import { gtfsBuild, gtfsListOptions } from "@/lib/routeImport/gtfs";
 import { classifyResults, geocodeStops } from "@/lib/routeImport/geocode";
 import { chunkWaypoints, parseOsrmResponse, routeThroughStops, straightLine } from "@/lib/routeImport/routing";
 import { buildPayload, makeImportKey } from "@/lib/routeImport/payload";
+import { parseStoredStops, serializeStops, stopsSignature } from "@/lib/routeImport/stops";
 import { ImportError, type ImportStop } from "@/lib/routeImport/types";
 
 // ---- ZIP de teste (compactado de verdade com deflate) ----
@@ -286,5 +287,30 @@ describe("payload para o banco", () => {
   });
   it("recusa parada sem coordenada", () => {
     expect(() => buildPayload({ ...base, stops: [{ id: "1", seq: 1, name: "A", lat: null, lng: null, coord: "ausente" }] })).toThrow(ImportError);
+  });
+});
+
+describe("paradas guardadas para reeditar no editor", () => {
+  const json = [
+    { seq: 2, name: "B", lat: 0.04, lng: -51.06, coord: "geocodificada", note: "n" },
+    { seq: 1, name: "A", lat: 0.03, lng: -51.07, coord: "fonte" },
+    { seq: 3, name: "ruim", lat: "x", lng: -51 },
+    "lixo",
+  ];
+  it("lê, descarta entradas inválidas e ordena pela sequência", () => {
+    const r = parseStoredStops(json);
+    expect(r.map((x) => x.name)).toEqual(["A", "B"]);
+    expect(r.map((x) => x.seq)).toEqual([1, 2]);
+    expect(parseStoredStops(null)).toEqual([]);
+  });
+  it("arrastar uma parada muda a assinatura; voltar ao lugar restaura", () => {
+    const r = parseStoredStops(json);
+    const moved = r.map((x, i) => (i === 0 ? { ...x, lat: 0.0301 } : x));
+    expect(stopsSignature(moved)).not.toBe(stopsSignature(r));
+    expect(stopsSignature(moved.map((x, i) => (i === 0 ? { ...x, lat: 0.03 } : x)))).toBe(stopsSignature(r));
+  });
+  it("serializa com 6 casas, renumera e preserva a origem da coordenada", () => {
+    const out = serializeStops([{ seq: 9, name: "A", lat: 0.0300004, lng: -51.07, coord: "manual" }]);
+    expect(out).toEqual([{ seq: 1, name: "A", lat: 0.03, lng: -51.07, coord: "manual" }]);
   });
 });

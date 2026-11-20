@@ -1,4 +1,4 @@
-import { Suspense, lazy, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { ClientOnly } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { Redo2, Route as RouteIcon, Trash, Undo2 } from "lucide-react";
@@ -11,6 +11,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatDistance, isLatLngArray, pathLength, type LatLng } from "@/lib/geo";
 import type { EditorMode } from "@/components/map/EditorMap";
+import { routeThroughStops } from "@/lib/routeImport/routing";
+import { parseStoredStops, serializeStops, stopsSignature, type StoredStop } from "@/lib/routeImport/stops";
+import { COORD_LABELS, ImportError, inServiceArea, type CoordSource } from "@/lib/routeImport/types";
 
 const EditorMap = lazy(() => import("@/components/map/EditorMap"));
 
@@ -40,6 +43,85 @@ export function RouteEditor({ initial, onDone }: { initial: RouteRow | null; onD
   const [mode, setMode] = useState<EditorMode>(method === "osrm" ? "origin" : "draw");
   const [busy, setBusy] = useState(false);
   const points = history[cursor] ?? [];
+
+  // Paradas da importação (route_imports): ficam arrastáveis aqui para corrigir a posição depois.
+  const [tab, setTab] = useState<"osrm" | "manual" | "stops">(method);
+  const [imp, setImp] = useState<{ id: string; geometryOrigin: string } | null>(null);
+  const [stopHist, setStopHist] = useState<{ list: StoredStop[][]; i: number }>({ list: [[]], i: 0 });
+  const [loadSig, setLoadSig] = useState("");
+  const [calcSig, setCalcSig] = useState("");
+  const [recalc, setRecalc] = useState(false);
+  const [tick, setTick] = useState(0);
+  const stops = stopHist.list[stopHist.i] ?? [];
+  const stopsSig = stopsSignature(stops);
+  const stopsMoved = imp !== null && stopsSig !== loadSig;
+  const stale = imp !== null && imp.geometryOrigin !== "fonte" && stopsSig !== calcSig;
+  const mapStops = useMemo(
+    () => stops.map((s) => ({ lat: s.lat, lng: s.lng, name: s.name, coord: s.coord })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [stopHist, tick],
+  );
+
+  useEffect(() => {
+    if (!initial) return;
+    let alive = true;
+    void supabase
+      .from("route_imports")
+      .select("id,stops,geometry_origin")
+      .eq("route_id", initial.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!alive || !data) return;
+        const rows = parseStoredStops(data.stops);
+        if (rows.length === 0) return;
+        setImp({ id: data.id, geometryOrigin: data.geometry_origin });
+        setStopHist({ list: [rows], i: 0 });
+        setLoadSig(stopsSignature(rows));
+        setCalcSig(stopsSignature(rows));
+        setTab("stops");
+        setMode("view");
+      });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initial?.id]);
+
+  const commitStops = (next: StoredStop[]) =>
+    setStopHist((h) => {
+      const list = [...h.list.slice(0, h.i + 1), next].slice(-100);
+      return { list, i: list.length - 1 };
+    });
+  const moveStop = (i: number, p: LatLng) => {
+    if (!inServiceArea(p[0], p[1])) {
+      toast.error("Essa posição está fora da área de serviço (Macapá/Santana).");
+      setTick((t) => t + 1); // devolve o marcador ao lugar anterior
+      return;
+    }
+    commitStops(stops.map((s, j) => (j === i ? { ...s, lat: p[0], lng: p[1], coord: "manual" } : s)));
+  };
+  const undoStops = () => setStopHist((h) => (h.i > 0 ? { ...h, i: h.i - 1 } : h));
+  const redoStops = () => setStopHist((h) => (h.i < h.list.length - 1 ? { ...h, i: h.i + 1 } : h));
+
+  const calcFromStops = async () => {
+    if (stops.length < 2) {
+      toast.error("São necessárias pelo menos 2 paradas.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await routeThroughStops(stops.map((s) => [s.lat, s.lng] as LatLng));
+      commit(r.geometry);
+      setMethod("osrm");
+      setCalcSig(stopsSig);
+      setRecalc(true);
+      toast.success("Trajeto recalculado pelas vias a partir das paradas. Confira no mapa.");
+    } catch (e) {
+      toast.error(e instanceof ImportError ? e.message : "Roteamento indisponível.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const commit = (next: LatLng[]) => {
     const h = history.slice(0, cursor + 1);
@@ -98,6 +180,12 @@ export function RouteEditor({ initial, onDone }: { initial: RouteRow | null; onD
       toast.error("O traçado precisa de pelo menos 2 pontos.");
       return;
     }
+    if (status === "published" && stale) {
+      toast.error("As paradas foram movidas: recalcule o trajeto antes de publicar.");
+      return;
+    }
+    const firstStop = imp ? stops[0] : undefined;
+    const lastStop = imp ? stops[stops.length - 1] : undefined;
     setBusy(true);
     const row = {
       code: code.trim().toUpperCase(),
@@ -107,10 +195,10 @@ export function RouteEditor({ initial, onDone }: { initial: RouteRow | null; onD
       direction,
       origin_label: originLabel.trim(),
       dest_label: destLabel.trim(),
-      origin_lat: origin?.[0] ?? points[0]?.[0] ?? null,
-      origin_lng: origin?.[1] ?? points[0]?.[1] ?? null,
-      dest_lat: dest?.[0] ?? points.at(-1)?.[0] ?? null,
-      dest_lng: dest?.[1] ?? points.at(-1)?.[1] ?? null,
+      origin_lat: firstStop?.lat ?? origin?.[0] ?? points[0]?.[0] ?? null,
+      origin_lng: firstStop?.lng ?? origin?.[1] ?? points[0]?.[1] ?? null,
+      dest_lat: lastStop?.lat ?? dest?.[0] ?? points.at(-1)?.[0] ?? null,
+      dest_lng: lastStop?.lng ?? dest?.[1] ?? points.at(-1)?.[1] ?? null,
       geometry: points as unknown as Json,
       distance_m: Math.round(pathLength(points)),
       creation_method: method,
@@ -123,6 +211,17 @@ export function RouteEditor({ initial, onDone }: { initial: RouteRow | null; onD
     if (error) {
       toast.error(error.code === "23505" ? "Já existe uma rota com esse código." : error.message);
       return;
+    }
+    if (imp && (stopsMoved || recalc)) {
+      const patch: { stops: Json; geometry_origin?: string; segments?: Json } = {
+        stops: serializeStops(stops) as unknown as Json,
+      };
+      if (recalc) {
+        patch.geometry_origin = "osrm";
+        patch.segments = [{ start: 0, end: Math.max(0, points.length - 1), kind: "osrm" }] as unknown as Json;
+      }
+      const { error: impError } = await supabase.from("route_imports").update(patch).eq("id", imp.id);
+      if (impError) toast.error("A rota foi salva, mas não consegui atualizar as paradas importadas: " + impError.message);
     }
     toast.success(status === "published" ? "Rota publicada." : "Rascunho salvo.");
     onDone();
@@ -193,19 +292,67 @@ export function RouteEditor({ initial, onDone }: { initial: RouteRow | null; onD
         </div>
 
         <Tabs
-          value={method}
+          value={tab}
           onValueChange={(v) => {
-            setMethod(v as "osrm" | "manual");
-            setMode(v === "osrm" ? "origin" : "draw");
+            const t = v as "osrm" | "manual" | "stops";
+            setTab(t);
+            if (t === "stops") {
+              setMode("view");
+              return;
+            }
+            setMethod(t);
+            setMode(t === "osrm" ? "origin" : "draw");
           }}
         >
-          <TabsList className="grid w-full grid-cols-2">
+          <TabsList className={`grid w-full ${imp ? "grid-cols-3" : "grid-cols-2"}`}>
             <TabsTrigger value="osrm">A · Origem e destino</TabsTrigger>
             <TabsTrigger value="manual">B · Desenho manual</TabsTrigger>
+            {imp && <TabsTrigger value="stops">C · Paradas</TabsTrigger>}
           </TabsList>
         </Tabs>
 
-        {method === "osrm" ? (
+        {tab === "stops" && imp ? (
+          <div className="space-y-2 text-sm">
+            <p className="text-xs text-muted-foreground">
+              Arraste as paradas no mapa para corrigir a posição de cada uma. Depois clique em “Recalcular trajeto
+              pelas vias”. Nada muda no mapa público enquanto a rota for rascunho.
+            </p>
+            {stale && (
+              <p className="text-xs text-warn">
+                Paradas movidas: o trajeto está desatualizado. Recalcule antes de publicar.
+              </p>
+            )}
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" disabled={stopHist.i === 0} onClick={undoStops} aria-label="Desfazer">
+                <Undo2 />
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={stopHist.i >= stopHist.list.length - 1}
+                onClick={redoStops}
+                aria-label="Refazer"
+              >
+                <Redo2 />
+              </Button>
+            </div>
+            <Button className="w-full" onClick={calcFromStops} disabled={busy || stops.length < 2}>
+              <RouteIcon /> Recalcular trajeto pelas vias
+            </Button>
+            <ul className="max-h-48 space-y-1 overflow-y-auto text-xs">
+              {stops.map((s, i) => (
+                <li key={i} className="flex items-center justify-between gap-2 rounded border px-2 py-1">
+                  <span className="truncate">
+                    {i + 1}. {s.name}
+                  </span>
+                  <span className="shrink-0 text-muted-foreground">
+                    {COORD_LABELS[s.coord as CoordSource] ?? s.coord}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : method === "osrm" ? (
           <div className="space-y-2 text-sm">
             <div className="flex gap-2">
               <Button
@@ -311,6 +458,8 @@ export function RouteEditor({ initial, onDone }: { initial: RouteRow | null; onD
               onMapClick={onMapClick}
               onMovePoint={(i, p) => commit(points.map((q, j) => (j === i ? p : q)))}
               onDeletePoint={(i) => commit(points.filter((_, j) => j !== i))}
+              stops={tab === "stops" && imp ? mapStops : undefined}
+              onMoveStop={moveStop}
             />
           </Suspense>
         </ClientOnly>
