@@ -3,6 +3,7 @@ import { ClientOnly, Link, createFileRoute } from "@tanstack/react-router";
 import { Bus, ChevronDown, ChevronUp, Clock, Crosshair, Info, LocateFixed, Radio, Settings, ShieldCheck, Signal, Square, User, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useMapData, type BusGroup } from "@/hooks/useMapData";
+import { getBridge } from "@/lib/nativeGps";
 import { useGpsShare } from "@/hooks/useGpsShare";
 import { useAuth } from "@/hooks/useAuth";
 import { formatAge, groupState } from "@/lib/freshness";
@@ -625,9 +626,18 @@ function GroupPanel({
   );
 }
 
+/**
+ * Anúncio do AdSense. Dentro do app Android (WebView do App Inventor) ele NÃO é exibido: o Google só permite
+ * AdSense em WebView com o SDK próprio; no app o anúncio é o banner nativo do AdMob, fora desta página.
+ */
 function AdSlot() {
   const ref = useRef<HTMLModElement>(null);
+  const [inApp, setInApp] = useState<boolean | null>(null);
   useEffect(() => {
+    setInApp(getBridge() !== null);
+  }, []);
+  useEffect(() => {
+    if (inApp !== false) return;
     const el = ref.current;
     if (!el || el.dataset["pushed"]) return;
     el.dataset["pushed"] = "1";
@@ -637,7 +647,8 @@ function AdSlot() {
     } catch {
       // ignora
     }
-  }, []);
+  }, [inApp]);
+  if (inApp !== false) return null;
   return (
     <div className="mt-1 space-y-0.5 pt-1" aria-label="Publicidade">
       <p className="text-center text-[10px] uppercase tracking-wide text-muted-foreground">Publicidade</p>
