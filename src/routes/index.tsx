@@ -42,6 +42,7 @@ const MATCH_TEXT: Record<string, string> = {
     "Sua posição é compatível com a última posição conhecida; você está atualizando esse ônibus.",
   target_mismatch:
     "Sua posição não é compatível com a última posição conhecida. Iniciamos um acompanhamento independente.",
+  resumed: "Este aparelho já estava compartilhando: a sessão foi retomada.",
 };
 
 function useBoxHeight<T extends HTMLElement>() {
@@ -304,7 +305,6 @@ function Index() {
                 >
                   <ChevronUp className="size-4" /> Detalhes
                 </button>
-                <AdSlot />
                 <Button
                   variant="destructive"
                   className="h-11 w-full rounded-xl text-base"
@@ -370,7 +370,6 @@ function Index() {
                 >
                   <ChevronUp className="size-4" /> Abrir painel
                 </button>
-                <AdSlot />
               </>
             ) : (
             <>
@@ -404,8 +403,6 @@ function Index() {
                 </p>
               ) : null}
               {locMsg && <p className="text-xs text-destructive">{locMsg}</p>}
-              {/* Espaço reservado para publicidade (Google AdSense) no futuro */}
-              <AdSlot />
               <div className="flex gap-2">
                 <Button
                   variant="outline"
@@ -437,6 +434,8 @@ function Index() {
               </p>
             </>
           )}
+          {/* Anúncio fixo (um só espaço, não remonta ao trocar de painel) */}
+          <AdSlot />
         </div>
       </section>
 
@@ -640,14 +639,17 @@ function AdSlot() {
     }
   }, []);
   return (
-    <div className="flex min-h-[50px] justify-center overflow-hidden" aria-label="Publicidade">
-      <ins
-        ref={ref}
-        className="adsbygoogle"
-        style={{ display: "inline-block", width: "300px", height: "50px" }}
-        data-ad-client="ca-pub-2404280823675572"
-        data-ad-slot="0639487540"
-      />
+    <div className="mt-1 space-y-0.5 pt-1" aria-label="Publicidade">
+      <p className="text-center text-[10px] uppercase tracking-wide text-muted-foreground">Publicidade</p>
+      <div className="flex min-h-[50px] justify-center overflow-hidden">
+        <ins
+          ref={ref}
+          className="adsbygoogle"
+          style={{ display: "inline-block", width: "300px", height: "50px" }}
+          data-ad-client="ca-pub-2404280823675572"
+          data-ad-slot="0639487540"
+        />
+      </div>
     </div>
   );
 }
@@ -698,19 +700,6 @@ function SharePanel({
       </div>
       {share.start && (
         <p className="rounded-xl bg-muted p-2 text-xs">{MATCH_TEXT[share.start.match]}</p>
-      )}
-      {share.debugPosition && (
-        <div className="rounded-xl border border-dashed border-primary/50 bg-muted/70 p-2 text-[11px] font-mono">
-          <p className="font-bold">DIAGNÓSTICO GPS (temporário)</p>
-          <p>Fonte: {share.debugPosition.source}</p>
-          <p>Latitude: {share.debugPosition.latitude.toFixed(6)}</p>
-          <p>Longitude: {share.debugPosition.longitude.toFixed(6)}</p>
-          <p>Precisão: ±{Math.round(share.debugPosition.accuracy)} m</p>
-          <p>
-            Última leitura:{" "}
-            {new Date(share.debugPosition.timestamp).toLocaleTimeString("pt-BR")}
-          </p>
-        </div>
       )}
 
       {share.start?.off_route && (

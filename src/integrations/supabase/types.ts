@@ -436,7 +436,7 @@ export type Database = {
           {
             foreignKeyName: "route_imports_route_id_fkey"
             columns: ["route_id"]
-            isOneToOne: false
+            isOneToOne: true
             referencedRelation: "routes"
             referencedColumns: ["id"]
           },
@@ -603,6 +603,7 @@ export type Database = {
     }
     Functions: {
       admin_save_route_import: { Args: { p: Json }; Returns: Json }
+      my_active_session: { Args: { p_secret: string; p_visitor: string }; Returns: Json }
       admin_stats: { Args: never; Returns: Json }
       award_achievements: { Args: { p_user: string }; Returns: undefined }
       claim_visitor: {

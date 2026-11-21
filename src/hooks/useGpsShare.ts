@@ -1,12 +1,13 @@
 import { createContext, createElement, useContext, type ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { ensureVisitor, type VisitorCreds } from "@/lib/visitor";
+import { ensureVisitor, readVisitor, saveVisitor, type VisitorCreds } from "@/lib/visitor";
 import { errorCode, friendlyError } from "@/lib/errors";
 import { isCurrentNativeResult, parseNativeRpcResult } from "@/lib/nativeRpc";
 import {
   getBridge,
   parseNativeGps,
+  parseNativeResume,
   readWebViewString,
   sendNativeCommand,
   START_GPS,
@@ -20,11 +21,22 @@ export type ShareStatus =
 export type StartResult = {
   session_id: string;
   group_id: string;
-  match: "new_group" | "joined_active" | "joined_stale" | "target_mismatch";
+  match: "new_group" | "joined_active" | "joined_stale" | "target_mismatch" | "resumed";
   off_route: boolean;
   update_interval_s: number;
   timeout_s: number;
   contributors: number;
+};
+/** Resposta de my_active_session: a sessão ativa deste aparelho, se houver. */
+type MyActiveSession = {
+  session_id: string;
+  group_id: string;
+  route_id: string;
+  started_at: string;
+  last_update_at: string;
+  update_interval_s: number;
+  timeout_s: number;
+  contributors: number | null;
 };
 export type EndResult = {
   ended: boolean;
@@ -125,6 +137,7 @@ function useGpsShareState() {
   const sending = useRef(false);
   const resumeUntil = useRef(0);
   const resumeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const adopting = useRef(false);
 
   const cleanup = useCallback(() => {
     if (nativeMode.current) sendNativeCommand(STOP_GPS);
@@ -157,6 +170,33 @@ function useGpsShareState() {
     } catch {
       /* not supported or denied */
     }
+  }, []);
+
+  /** Lê o WebViewString (mensagens do app Android) a cada 500 ms. */
+  const startNativePolling = useCallback(() => {
+    nativeLastRaw.current = readWebViewString();
+    if (nativePoll.current) clearInterval(nativePoll.current);
+    nativePoll.current = setInterval(() => {
+      const raw = readWebViewString();
+      if (raw && raw !== nativeLastRaw.current) {
+        nativeLastRaw.current = raw;
+        receiveNative.current(raw);
+      }
+    }, 500);
+  }, []);
+
+  /** Janela em que não marcamos "pausado": o app acabou de voltar e as confirmações ainda não chegaram. */
+  const startResume = useCallback(() => {
+    const s = session.current;
+    if (!s || !nativeMode.current) return;
+    const graceMs = Math.max(30, s.update_interval_s * 3 + 5) * 1000;
+    resumeUntil.current = Date.now() + graceMs;
+    setResuming(true);
+    if (resumeTimer.current) clearTimeout(resumeTimer.current);
+    resumeTimer.current = setTimeout(() => {
+      resumeTimer.current = null;
+      setResuming(false);
+    }, graceMs);
   }, []);
 
   const send = useCallback(async () => {
@@ -240,17 +280,9 @@ function useGpsShareState() {
           nativeLatest.current = null;
           nativeTimestamp.current = 0;
           // Ignore whatever string was left in WebViewString before this request.
-          nativeLastRaw.current = readWebViewString();
           setMessage("Aguardando GPS nativo do aplicativo…");
           sendNativeCommand(START_GPS);
-          if (nativePoll.current) clearInterval(nativePoll.current);
-          nativePoll.current = setInterval(() => {
-            const raw = readWebViewString();
-            if (raw && raw !== nativeLastRaw.current) {
-              nativeLastRaw.current = raw;
-              receiveNative.current(raw);
-            }
-          }, 500);
+          startNativePolling();
           const deadline = Date.now() + 25000;
           while (!nativeLatest.current && Date.now() < deadline)
             await new Promise((r) => setTimeout(r, 250));
@@ -325,7 +357,56 @@ function useGpsShareState() {
         return null;
       }
     },
-    [send, cleanup, requestWakeLock],
+    [send, cleanup, requestWakeLock, startNativePolling],
+  );
+
+  /**
+   * Reabriu o app e o serviço de GPS do Android continuou enviando: pergunta ao servidor se este aparelho
+   * tem sessão ativa e, se tiver, volta a mostrá-la como "sua" (sem iniciar outra).
+   */
+  const adopt = useCallback(
+    async (c: VisitorCreds) => {
+      if (session.current || adopting.current) return;
+      adopting.current = true;
+      try {
+        const { data, error } = await supabase.rpc("my_active_session", {
+          p_visitor: c.visitor_id,
+          p_secret: c.secret,
+        });
+        if (error || !data || session.current) return;
+        const r = data as unknown as MyActiveSession;
+        creds.current = c;
+        nativeMode.current = true;
+        nativeRpcActive.current = true; // o app Android é quem grava as posições
+        nativeRpcTimestamp.current = 0;
+        const resumed: StartResult = {
+          session_id: r.session_id,
+          group_id: r.group_id,
+          match: "resumed",
+          off_route: false,
+          update_interval_s: r.update_interval_s,
+          timeout_s: r.timeout_s,
+          contributors: r.contributors ?? 1,
+        };
+        session.current = resumed;
+        setStart(resumed);
+        setContributors(resumed.contributors);
+        const at = Date.parse(r.last_update_at);
+        lastAckRef.current = Number.isFinite(at) ? at : Date.now();
+        setLastAck(lastAckRef.current);
+        setStatus("active");
+        setMessage(null);
+        startNativePolling();
+        if (timer.current) clearInterval(timer.current);
+        timer.current = setInterval(send, Math.max(4, r.update_interval_s) * 1000);
+        startResume();
+      } catch {
+        // sem sessão ou sem rede: segue como observador
+      } finally {
+        adopting.current = false;
+      }
+    },
+    [send, startNativePolling, startResume],
   );
 
   const stop = useCallback(async () => {
@@ -406,18 +487,6 @@ function useGpsShareState() {
 
   // Background / visibility / connectivity handling
   useEffect(() => {
-    const startResume = () => {
-      const s = session.current;
-      if (!s || !nativeMode.current) return;
-      const graceMs = Math.max(30, s.update_interval_s * 3 + 5) * 1000;
-      resumeUntil.current = Date.now() + graceMs;
-      setResuming(true);
-      if (resumeTimer.current) clearTimeout(resumeTimer.current);
-      resumeTimer.current = setTimeout(() => {
-        resumeTimer.current = null;
-        setResuming(false);
-      }, graceMs);
-    };
     const onVis = () => {
       const hidden = document.visibilityState === "hidden";
       setBackgrounded(hidden);
@@ -439,12 +508,16 @@ function useGpsShareState() {
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
     };
-  }, [send, requestWakeLock]);
+  }, [send, requestWakeLock, startResume]);
 
   // End a session left over from a previous page load
   useEffect(() => {
     const leftover = readSessionId();
-    if (leftover) {
+    if (leftover && getBridge()) {
+      // No app Android o serviço de GPS continua rodando depois que a página recarrega: não encerre,
+      // a sessão é retomada pelo efeito abaixo.
+      clearSessionId();
+    } else if (leftover) {
       ensureVisitor()
         .then((c) =>
           supabase.rpc("end_session", {
@@ -459,6 +532,22 @@ function useGpsShareState() {
       cleanup();
     };
   }, [cleanup]);
+
+  // App Android reaberto com o serviço ainda enviando: reconhece a sessão como deste aparelho.
+  useEffect(() => {
+    if (!getBridge()) return;
+    const attempt = () => {
+      if (session.current) return;
+      const raw = readWebViewString();
+      const resume = raw ? parseNativeResume(raw) : null;
+      if (resume) saveVisitor(resume);
+      const c = resume ?? readVisitor();
+      if (c) void adopt(c);
+    };
+    attempt();
+    const retry = setTimeout(attempt, 4000);
+    return () => clearTimeout(retry);
+  }, [adopt]);
 
   const reset = useCallback(() => {
     setStatus("idle");

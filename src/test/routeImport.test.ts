@@ -11,6 +11,7 @@ import { classifyResults, geocodeStops } from "@/lib/routeImport/geocode";
 import { chunkWaypoints, parseOsrmResponse, routeThroughStops, straightLine } from "@/lib/routeImport/routing";
 import { buildPayload, makeImportKey } from "@/lib/routeImport/payload";
 import { parseStoredStops, serializeStops, stopsSignature } from "@/lib/routeImport/stops";
+import { parseNativeResume } from "@/lib/nativeGps";
 import { ImportError, type ImportStop } from "@/lib/routeImport/types";
 
 // ---- ZIP de teste (compactado de verdade com deflate) ----
@@ -312,5 +313,18 @@ describe("paradas guardadas para reeditar no editor", () => {
   it("serializa com 6 casas, renumera e preserva a origem da coordenada", () => {
     const out = serializeStops([{ seq: 9, name: "A", lat: 0.0300004, lng: -51.07, coord: "manual" }]);
     expect(out).toEqual([{ seq: 1, name: "A", lat: 0.03, lng: -51.07, coord: "manual" }]);
+  });
+});
+
+describe("retomada pelo app Android (NATIVE_RESUME)", () => {
+  const id = "123e4567-e89b-12d3-a456-426614174000";
+  const secret = "a".repeat(64);
+  it("aceita só a mensagem completa e bem formada", () => {
+    expect(parseNativeResume(JSON.stringify({ action: "NATIVE_RESUME", visitor_id: id, secret }))).toEqual({ visitor_id: id, secret });
+    expect(parseNativeResume(JSON.stringify({ action: "GPS_UPDATE", visitor_id: id, secret }))).toBeNull();
+    expect(parseNativeResume(JSON.stringify({ action: "NATIVE_RESUME", visitor_id: "x", secret }))).toBeNull();
+    expect(parseNativeResume(JSON.stringify({ action: "NATIVE_RESUME", visitor_id: id, secret: "curto" }))).toBeNull();
+    expect(parseNativeResume("não é json")).toBeNull();
+    expect(parseNativeResume(null)).toBeNull();
   });
 });

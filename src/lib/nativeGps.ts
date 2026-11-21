@@ -41,6 +41,31 @@ export function sessionStartedMessage(s: {
   });
 }
 
+export type NativeResume = { visitor_id: string; secret: string };
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Android → Web, ao reabrir o app com o serviço de GPS ainda ativo:
+ * {"action":"NATIVE_RESUME","visitor_id":"...","secret":"..."} (os mesmos valores do SESSION_STARTED).
+ * O servidor confere o segredo, então a mensagem só vale para a sessão do próprio aparelho.
+ */
+export function parseNativeResume(raw: unknown): NativeResume | null {
+  try {
+    const v = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (!v || typeof v !== "object") return null;
+    const o = v as Record<string, unknown>;
+    if (o["action"] !== "NATIVE_RESUME") return null;
+    const id = o["visitor_id"];
+    const secret = o["secret"];
+    if (typeof id !== "string" || !UUID_RE.test(id)) return null;
+    if (typeof secret !== "string" || !/^[0-9a-f]{64}$/i.test(secret)) return null;
+    return { visitor_id: id, secret };
+  } catch {
+    return null;
+  }
+}
+
 export function getBridge(): AppInventorBridge | null {
   if (typeof window === "undefined") return null;
   const ai = window.AppInventor;
