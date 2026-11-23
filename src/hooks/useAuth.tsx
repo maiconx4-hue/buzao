@@ -22,9 +22,15 @@ export function useAuth() {
     };
     load();
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
-      // Depois de sair, o Google não deve reentrar sozinho na conta anterior.
-      if (event === "SIGNED_OUT") getGsi()?.disableAutoSelect();
-      if (event === "SIGNED_IN" || event === "SIGNED_OUT" || event === "USER_UPDATED") load();
+    // Depois de sair, o Google não deve reentrar sozinho na conta anterior.
+    if (event === "SIGNED_OUT") getGsi()?.disableAutoSelect();
+
+    // Evita executar operações assíncronas dentro do callback de autenticação.
+    if (event === "SIGNED_IN" || event === "SIGNED_OUT" || event === "USER_UPDATED") {
+    window.setTimeout(() => {
+      if (alive) void load();
+    }, 0);
+    }
     });
     return () => {
       alive = false;
