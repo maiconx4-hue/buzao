@@ -16,7 +16,7 @@ type Search = { next?: string | undefined };
 
 // Client ID (público) do Google para "Entrar com Google" via Google Identity Services + signInWithIdToken.
 // Sem ele, a tela mantém o comportamento anterior.
-// VITE_GOOGLE_IN_APP="true" mostra o botão também dentro do app Android (WebView), para testar.
+// VITE_GOOGLE_IN_APP="true" força o botão novo também dentro do app Android (WebView) — em teste ele ficou em branco.
 const GOOGLE_IN_APP = import.meta.env["VITE_GOOGLE_IN_APP"] === "true";
 const GOOGLE_CLIENT_ID = (() => {
   const v: unknown = import.meta.env["VITE_GOOGLE_CLIENT_ID"];
@@ -154,20 +154,11 @@ function AuthPage() {
           <p className="text-sm text-muted-foreground">Opcional — o mapa funciona sem cadastro.</p>
         </div>
       </div>
-      {GOOGLE_CLIENT_ID ? (
-        getBridge() && !GOOGLE_IN_APP ? (
-          <p className="rounded-xl border bg-card p-3 text-xs text-muted-foreground">
-            Dentro do aplicativo, entre com e-mail e senha. O login com Google funciona abrindo o site no
-            navegador.
-          </p>
-        ) : (
-          <GoogleSignInButton
-            clientId={GOOGLE_CLIENT_ID}
-            onSignedIn={go}
-            onError={(m) => toast.error(m)}
-          />
-        )
+      {GOOGLE_CLIENT_ID && !(getBridge() && !GOOGLE_IN_APP) ? (
+        <GoogleSignInButton clientId={GOOGLE_CLIENT_ID} onSignedIn={go} onError={(m) => toast.error(m)} />
       ) : (
+        // Dentro do app Android (WebView) o botão do Google usa uma janela pop-up, que o WebView não
+        // suporta (tela em branco). Lá continua o fluxo por redirecionamento, que funciona.
         <Button variant="outline" onClick={google}>
           Continuar com Google
         </Button>
