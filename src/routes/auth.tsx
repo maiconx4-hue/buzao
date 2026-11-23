@@ -16,6 +16,8 @@ type Search = { next?: string | undefined };
 
 // Client ID (público) do Google para "Entrar com Google" via Google Identity Services + signInWithIdToken.
 // Sem ele, a tela mantém o comportamento anterior.
+// VITE_GOOGLE_IN_APP="true" mostra o botão também dentro do app Android (WebView), para testar.
+const GOOGLE_IN_APP = import.meta.env["VITE_GOOGLE_IN_APP"] === "true";
 const GOOGLE_CLIENT_ID = (() => {
   const v: unknown = import.meta.env["VITE_GOOGLE_CLIENT_ID"];
   return typeof v === "string" && v.trim() !== "" ? v.trim() : undefined;
@@ -121,7 +123,8 @@ function AuthPage() {
       }
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
-        options: { redirectTo },
+        // Sempre mostra a lista de contas do Google (permite trocar de conta para testes).
+        options: { redirectTo, queryParams: { prompt: "select_account" } },
       });
       if (error) toast.error("Não foi possível entrar com Google.");
       return; // o navegador é redirecionado ao Google
@@ -152,7 +155,7 @@ function AuthPage() {
         </div>
       </div>
       {GOOGLE_CLIENT_ID ? (
-        getBridge() ? (
+        getBridge() && !GOOGLE_IN_APP ? (
           <p className="rounded-xl border bg-card p-3 text-xs text-muted-foreground">
             Dentro do aplicativo, entre com e-mail e senha. O login com Google funciona abrindo o site no
             navegador.
