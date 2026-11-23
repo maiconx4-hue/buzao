@@ -4,6 +4,8 @@ import { ArrowLeft, Bus } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable";
+import { GoogleSignInButton } from "@/components/GoogleSignInButton";
+import { getBridge } from "@/lib/nativeGps";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,6 +13,13 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type Search = { next?: string | undefined };
+
+// Client ID (público) do Google para "Entrar com Google" via Google Identity Services + signInWithIdToken.
+// Sem ele, a tela mantém o comportamento anterior.
+const GOOGLE_CLIENT_ID = (() => {
+  const v: unknown = import.meta.env["VITE_GOOGLE_CLIENT_ID"];
+  return typeof v === "string" && v.trim() !== "" ? v.trim() : undefined;
+})();
 
 export const Route = createFileRoute("/auth")({
   validateSearch: (s: Record<string, unknown>): Search => ({
@@ -142,9 +151,24 @@ function AuthPage() {
           <p className="text-sm text-muted-foreground">Opcional — o mapa funciona sem cadastro.</p>
         </div>
       </div>
-      <Button variant="outline" onClick={google}>
-        Continuar com Google
-      </Button>
+      {GOOGLE_CLIENT_ID ? (
+        getBridge() ? (
+          <p className="rounded-xl border bg-card p-3 text-xs text-muted-foreground">
+            Dentro do aplicativo, entre com e-mail e senha. O login com Google funciona abrindo o site no
+            navegador.
+          </p>
+        ) : (
+          <GoogleSignInButton
+            clientId={GOOGLE_CLIENT_ID}
+            onSignedIn={go}
+            onError={(m) => toast.error(m)}
+          />
+        )
+      ) : (
+        <Button variant="outline" onClick={google}>
+          Continuar com Google
+        </Button>
+      )}
       <Tabs defaultValue="login">
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="login">Entrar</TabsTrigger>
