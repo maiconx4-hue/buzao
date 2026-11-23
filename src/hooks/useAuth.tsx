@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
+import { getGsi } from "@/lib/googleIdentity";
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
@@ -21,6 +22,8 @@ export function useAuth() {
     };
     load();
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      // Depois de sair, o Google não deve reentrar sozinho na conta anterior.
+      if (event === "SIGNED_OUT") getGsi()?.disableAutoSelect();
       if (event === "SIGNED_IN" || event === "SIGNED_OUT" || event === "USER_UPDATED") load();
     });
     return () => {
