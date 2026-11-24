@@ -68,11 +68,21 @@ export default function BusMap({
       13,
     );
    
-    const street = L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",  {
+   /* const street = L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",  {
       maxZoom: 20,
       subdomains: "abcd",
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    }).addTo(m);
+    }).addTo(m);*/
+
+        const street = L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+      {
+        maxZoom: 19,
+        maxNativeZoom: 18,
+        attribution: "Tiles &copy; Esri",
+      },
+    ).addTo(m);
+
 
     const satellite = L.layerGroup([
       L.tileLayer(
