@@ -4,6 +4,8 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { MACAPA_CENTER, isLatLngArray, type LatLng } from "@/lib/geo";
 import type { GroupState } from "@/lib/freshness";
+import "leaflet.gridlayer.googlemutant";
+
 
 const BUS_SVG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6v6"/><path d="M15 6v6"/><path d="M2 12h19.6"/><path d="M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.4-.1-.8-.2-1.2l-1.4-5C20.1 6.8 19.1 6 18 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3"/><circle cx="7" cy="18" r="2"/><path d="M9 18h5"/><circle cx="16" cy="18" r="2"/></svg>';
@@ -37,6 +39,33 @@ type Props = {
   insets?: { top: number; bottom: number };
 };
 
+
+function loadGoogleMaps(apiKey: string): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve();
+  if ((window as any).google?.maps) return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    const existing = document.getElementById("google-maps-api-script");
+    if (existing) {
+      if ((window as any).google?.maps) {
+        resolve();
+      } else {
+        existing.addEventListener("load", () => resolve());
+        existing.addEventListener("error", reject);
+      }
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.id = "google-maps-api-script";
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&loading=async`;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = (e) => reject(e);
+    document.head.appendChild(script);
+  });
+}
+
 export default function BusMap({
   routes,
   groups,
@@ -61,43 +90,80 @@ export default function BusMap({
   const cb = useRef({ onSelectGroup, onSelectRoute, onMapClick });
   cb.current = { onSelectGroup, onSelectRoute, onMapClick };
 
-  useEffect(() => {
+    useEffect(() => {
     if (!el.current || map.current) return;
-    const m = L.map(el.current, { zoomControl: false, attributionControl: true }).setView(
-      MACAPA_CENTER,
-      13,
-    );
-   
-     const street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-     }).addTo(m);
-      
 
-    const satellite = L.layerGroup([
-      L.tileLayer(
-        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        { maxZoom: 19, maxNativeZoom: 18, attribution: "Imagens &copy; Esri, Maxar, Earthstar Geographics" },
-      ),
-      L.tileLayer(
-        "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-        { maxZoom: 19, maxNativeZoom: 18 },
-      ),
-    ]);
-    L.control
-      .layers({ Mapa: street, "Satélite": satellite }, undefined, { position: "bottomright" })
-      .addTo(m);
-    L.control.zoom({ position: "bottomright" }).addTo(m);
-    routeLayer.current = L.layerGroup().addTo(m);
-    groupLayer.current = L.layerGroup().addTo(m);
-    meLayer.current = L.layerGroup().addTo(m);
-    m.on("click", () => cb.current.onMapClick?.());
-    map.current = m;
+    let isMounted = true;
+    const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+
+    const initMap = () => {
+      if (!isMounted || !el.current || map.current) return;
+
+      const m = L.map(el.current, { zoomControl: false, attributionControl: true }).setView(
+        MACAPA_CENTER,
+        13,
+      );
+
+      const hasGoogle = Boolean((window as any).google?.maps);
+
+      // Se a Google Maps API carregou com sucesso, usa o Google oficial; senão, fallback para OSM
+      const street = hasGoogle
+        ? (L.gridLayer as any).googleMutant({
+            type: "roadmap",
+            maxZoom: 20,
+          }).addTo(m)
+        : L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            maxZoom: 19,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+          }).addTo(m);
+
+      const satellite = hasGoogle
+        ? (L.gridLayer as any).googleMutant({
+            type: "hybrid",
+            maxZoom: 20,
+          })
+        : L.layerGroup([
+            L.tileLayer(
+              "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+              { maxZoom: 19, maxNativeZoom: 18, attribution: "Imagens &copy; Esri, Maxar, Earthstar Geographics" },
+            ),
+            L.tileLayer(
+              "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+              { maxZoom: 19, maxNativeZoom: 18 },
+            ),
+          ]);
+
+      L.control
+        .layers({ Mapa: street, "Satélite": satellite }, undefined, { position: "bottomright" })
+        .addTo(m);
+      L.control.zoom({ position: "bottomright" }).addTo(m);
+      routeLayer.current = L.layerGroup().addTo(m);
+      groupLayer.current = L.layerGroup().addTo(m);
+      meLayer.current = L.layerGroup().addTo(m);
+      m.on("click", () => cb.current.onMapClick?.());
+      map.current = m;
+    };
+
+    if (apiKey) {
+      loadGoogleMaps(apiKey)
+        .then(() => initMap())
+        .catch((err) => {
+          console.error("Falha ao carregar Google Maps API, usando fallback OSM:", err);
+          initMap();
+        });
+    } else {
+      initMap();
+    }
+
     return () => {
-      m.remove();
-      map.current = null;
+      isMounted = false;
+      if (map.current) {
+        map.current.remove();
+        map.current = null;
+      }
     };
   }, []);
+
 
   useEffect(() => {
     const layer = routeLayer.current;
