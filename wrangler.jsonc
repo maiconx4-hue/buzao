@@ -1,0 +1,18 @@
+{
+  // ...
+  "vars": {
+    "SUPABASE_JWKS_URL": "https://azyorkumnkclechshjbv.supabase.co/auth/v1/.well-known/jwks.json",
+    "SUPABASE_PROJECT_ID": "azyorkumnkclechshjbv",
+    "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_ahDak2fDYPcxrQEcW-L86A_S-z54Qnx",
+    "SUPABASE_URL": "https://azyorkumnkclechshjbv.supabase.co",
+    "VITE_GOOGLE_CLIENT_ID": "184550863627-km0fg5faer9ekgpl125lae9eo75efdgm.apps.googleusercontent.com",
+    "VITE_GOOGLE_IN_APP": "false",
+    "VITE_GOOGLE_LOGIN": "true",
+    "VITE_GOOGLE_MAPS_API_KEY": "AIzaSyB4C2oUpB6R-J0kWofnr2NHUWZjkqMUFwc",
+    "VITE_SUPABASE_PROJECT_ID": "azyorkumnkclechshjbv",
+    "VITE_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_ahDak2fDYPcxrQEcW-L86A_S-z54Qnx",
+    "VITE_SUPABASE_URL": "https://azyorkumnkclechshjbv.supabase.co",
+    "VITE_USE_OWN_SUPABASE": "true"
+  },
+  // ...
+}
