@@ -4,7 +4,13 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { MACAPA_CENTER, isLatLngArray, type LatLng } from "@/lib/geo";
 import type { GroupState } from "@/lib/freshness";
-import "leaflet.gridlayer.googlemutant";
+
+if (typeof window !== "undefined") {
+  (window as any).L = L;
+}
+// @ts-expect-error Import direto do arquivo ESM para contornar o bug de 'this.L' no Vite
+import GoogleMutant from "leaflet.gridlayer.googlemutant/src/Leaflet.GoogleMutant.mjs";
+
 
 
 const BUS_SVG =
@@ -107,8 +113,8 @@ export default function BusMap({
       const hasGoogle = Boolean((window as any).google?.maps);
 
       // Se a Google Maps API carregou com sucesso, usa o Google oficial; senão, fallback para OSM
-      const street = hasGoogle
-        ? (L.gridLayer as any).googleMutant({
+        const street = hasGoogle
+        ? new (GoogleMutant as any)({
             type: "roadmap",
             maxZoom: 20,
           }).addTo(m)
@@ -117,8 +123,9 @@ export default function BusMap({
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
           }).addTo(m);
 
-      const satellite = hasGoogle
-        ? (L.gridLayer as any).googleMutant({
+
+          const satellite = hasGoogle
+        ? new (GoogleMutant as any)({
             type: "hybrid",
             maxZoom: 20,
           })
@@ -132,6 +139,7 @@ export default function BusMap({
               { maxZoom: 19, maxNativeZoom: 18 },
             ),
           ]);
+      
 
       L.control
         .layers({ Mapa: street, "Satélite": satellite }, undefined, { position: "bottomright" })
