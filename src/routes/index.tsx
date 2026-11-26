@@ -196,7 +196,7 @@ function Index() {
             <div className="leading-tight">
               <h1 className="text-base font-bold">Bus AP</h1>
               <p className="text-[11px] text-muted-foreground">
-                Posições colaborativas · não oficial
+                Posições colaborativas
               </p>
             </div>
             <span
@@ -400,7 +400,7 @@ function Index() {
                 </p>
               ) : visibleGroups.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  Nenhum passageiro está compartilhando agora. Está em um ônibus? Seja o primeiro!
+                  Nenhum <b>passageiro</b> ou <b>motorista</b> está compartilhando agora. Está em um ônibus? Seja o primeiro!
                 </p>
               ) : null}
               {locMsg && <p className="text-xs text-destructive">{locMsg}</p>}
@@ -427,8 +427,7 @@ function Index() {
                 </Button>
               </div>
               <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                <Info className="size-3" /> Dados enviados voluntariamente por passageiros e motoristas. Não é
-                rastreamento oficial.{" "}
+                <Info className="size-3" /> Dados enviados voluntariamente por passageiros e motoristas. {" "}
                 <Link to="/privacidade" className="underline">
                   Privacidade
                 </Link>
