@@ -1,3 +1,4 @@
+import { loadGoogleMaps, createBaseLayers } from "@/lib/mapLayers";
 import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -43,26 +44,37 @@ export default function ImportMap({
   const cb = useRef({ onSelect, onMoveStop, onAddStop, addMode });
   cb.current = { onSelect, onMoveStop, onAddStop, addMode };
   const lastFit = useRef<number | null>(null);
+  
 
   useEffect(() => {
     if (!el.current || map.current) return;
-    const m = L.map(el.current).setView(MACAPA_CENTER, 13);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: "&copy; OpenStreetMap",
-    }).addTo(m);
-    layer.current = L.layerGroup().addTo(m);
-    m.on("click", (e: L.LeafletMouseEvent) => {
-      if (cb.current.addMode)
-        cb.current.onAddStop(+e.latlng.lat.toFixed(6), +e.latlng.lng.toFixed(6));
-      else cb.current.onSelect(null);
-    });
-    map.current = m;
+
+    let isMounted = true;
+    const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+
+    const initMap = () => {
+      if (!isMounted || !el.current || map.current) return;
+
+      const m = L.map(el.current).setView(MACAPA_CENTER, 12);
+      createBaseLayers(m);
+
+      layer.current = L.layerGroup().addTo(m);
+      map.current = m;
+    };
+
+    if (apiKey) {
+      loadGoogleMaps(apiKey).then(initMap).catch(initMap);
+    } else {
+      initMap();
+    }
+
     return () => {
-      m.remove();
+      isMounted = false;
+      map.current?.remove();
       map.current = null;
     };
   }, []);
+
 
   useEffect(() => {
     const lg = layer.current;
