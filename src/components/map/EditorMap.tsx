@@ -131,8 +131,9 @@ export default function EditorMap({
       });
       mk.addTo(lg);
     });
-    const pin = (p: LatLng, cls: string) =>
+     const pin = (p: LatLng, cls: string) =>
       L.marker(p, {
+        interactive: false,
         icon: L.divIcon({
           className: "",
           html: `<div class="pin-marker ${cls}"></div>`,
