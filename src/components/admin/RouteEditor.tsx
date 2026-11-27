@@ -1,7 +1,7 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { ClientOnly } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { Redo2, Route as RouteIcon, Trash, Undo2 } from "lucide-react";
+import { Crosshair, Redo2, Route as RouteIcon, Trash, Undo2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import type { Json, Tables } from "@/integrations/supabase/types";
 import { Button } from "@/components/ui/button";
@@ -55,6 +55,7 @@ export function RouteEditor({ initial, onDone }: { initial: RouteRow | null; onD
   const [recalc, setRecalc] = useState(false);
   const [tick, setTick] = useState(0);
   const stops = stopHist.list[stopHist.i] ?? [];
+  const [addStopMode, setAddStopMode] = useState(false);
   const stopsSig = stopsSignature(stops);
   const stopsMoved = imp !== null && stopsSig !== loadSig;
   const stale = imp !== null && imp.geometryOrigin !== "fonte" && stopsSig !== calcSig;
@@ -132,7 +133,22 @@ export function RouteEditor({ initial, onDone }: { initial: RouteRow | null; onD
     setCursor(Math.min(h.length - 1, 99));
   };
 
-  const onMapClick = (p: LatLng) => {
+    const onMapClick = (p: LatLng) => {
+    if (tab === "stops" && addStopMode) {
+      if (!inServiceArea(p[0], p[1])) {
+        toast.error("Essa posição está fora da área de serviço (Macapá/Santana).");
+        return;
+      }
+      const newStop: StoredStop = {
+        name: `Nova parada ${stops.length + 1}`,
+        lat: p[0],
+        lng: p[1],
+        coord: "manual",
+      };
+      commitStops([...stops, newStop]);
+      toast.success(`Parada ${stops.length + 1} adicionada.`);
+      return;
+    }
     if (mode === "origin") {
       setOrigin(p);
       setMode("dest");
@@ -141,6 +157,7 @@ export function RouteEditor({ initial, onDone }: { initial: RouteRow | null; onD
       setMode("view");
     } else if (mode === "draw") commit([...points, p]);
   };
+
 
   const calc = async () => {
     if (!origin || !dest) {
@@ -338,6 +355,30 @@ export function RouteEditor({ initial, onDone }: { initial: RouteRow | null; onD
                 <Redo2 />
               </Button>
             </div>
+
+                        <div className="flex gap-2">
+              <Button size="sm" variant="outline" disabled={stopHist.i === 0} onClick={undoStops} aria-label="Desfazer">
+                <Undo2 />
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={stopHist.i >= stopHist.list.length - 1}
+                onClick={redoStops}
+                aria-label="Refazer"
+              >
+                <Redo2 />
+              </Button>
+              <Button
+                size="sm"
+                variant={addStopMode ? "default" : "outline"}
+                onClick={() => setAddStopMode((v) => !v)}
+              >
+                <Crosshair /> {addStopMode ? "Clique no mapa…" : "Adicionar parada"}
+              </Button>
+            </div>
+
+            
             <Button className="w-full" onClick={calcFromStops} disabled={busy || stops.length < 2}>
               <RouteIcon /> Recalcular trajeto pelas vias
             </Button>
