@@ -33,19 +33,21 @@ export function RouteEditor({ initial, onDone }: { initial: RouteRow | null; onD
   const [dest, setDest] = useState<LatLng | null>(
     initial?.dest_lat != null ? [initial.dest_lat, initial.dest_lng!] : null,
   );
-  const [method, setMethod] = useState<"osrm" | "manual">(
-    (initial?.creation_method as "osrm" | "manual") ?? "osrm",
-  );
-  const [history, setHistory] = useState<LatLng[][]>([
-    isLatLngArray(initial?.geometry) ? (initial!.geometry as LatLng[]) : [],
-  ]);
+  const initialPoints = isLatLngArray(initial?.geometry) ? (initial!.geometry as LatLng[]) : [];
+  const hasExistingPoints = initialPoints.length > 0;
+  const initialMethod = (initial?.creation_method as "osrm" | "manual") ?? (hasExistingPoints ? "manual" : "osrm");
+
+  const [method, setMethod] = useState<"osrm" | "manual">(initialMethod);
+  const [history, setHistory] = useState<LatLng[][]>([initialPoints]);
   const [cursor, setCursor] = useState(0);
-  const [mode, setMode] = useState<EditorMode>(method === "osrm" ? "origin" : "draw");
+  const [mode, setMode] = useState<EditorMode>(hasExistingPoints || initialMethod === "manual" ? "draw" : "origin");
   const [busy, setBusy] = useState(false);
   const points = history[cursor] ?? [];
 
-  // Paradas da importação (route_imports): ficam arrastáveis aqui para corrigir a posição depois.
-  const [tab, setTab] = useState<"osrm" | "manual" | "stops">(method);
+  // Paradas da importação: se já tiver pontos ou for manual, abre direto na aba manual
+  const [tab, setTab] = useState<"osrm" | "manual" | "stops">(
+    hasExistingPoints && initialMethod === "manual" ? "manual" : initialMethod,
+  );
   const [imp, setImp] = useState<{ id: string; geometryOrigin: string } | null>(null);
   const [stopHist, setStopHist] = useState<{ list: StoredStop[][]; i: number }>({ list: [[]], i: 0 });
   const [loadSig, setLoadSig] = useState("");
@@ -352,7 +354,7 @@ export function RouteEditor({ initial, onDone }: { initial: RouteRow | null; onD
               ))}
             </ul>
           </div>
-        ) : method === "osrm" ? (
+        ) : tab === "osrm" ? (
           <div className="space-y-2 text-sm">
             <div className="flex gap-2">
               <Button
