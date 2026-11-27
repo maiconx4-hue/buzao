@@ -63,8 +63,9 @@ export default function EditorMap({
       layer.current = L.layerGroup().addTo(m);
 
       m.on("click", (e: L.LeafletMouseEvent) => {
-        onMapClickRef.current?.([e.latlng.lat, e.latlng.lng]);
+      cb.current.onMapClick([+e.latlng.lat.toFixed(6), +e.latlng.lng.toFixed(6)]);
       });
+
 
       map.current = m;
     };
