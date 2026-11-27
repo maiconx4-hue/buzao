@@ -341,22 +341,8 @@ export function RouteEditor({ initial, onDone }: { initial: RouteRow | null; onD
                 Paradas movidas: o trajeto está desatualizado. Recalcule antes de publicar.
               </p>
             )}
+            
             <div className="flex gap-2">
-              <Button size="sm" variant="outline" disabled={stopHist.i === 0} onClick={undoStops} aria-label="Desfazer">
-                <Undo2 />
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={stopHist.i >= stopHist.list.length - 1}
-                onClick={redoStops}
-                aria-label="Refazer"
-              >
-                <Redo2 />
-              </Button>
-            </div>
-
-                        <div className="flex gap-2">
               <Button size="sm" variant="outline" disabled={stopHist.i === 0} onClick={undoStops} aria-label="Desfazer">
                 <Undo2 />
               </Button>
