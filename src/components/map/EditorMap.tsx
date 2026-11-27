@@ -1,3 +1,4 @@
+import { loadGoogleMaps, createBaseLayers } from "@/lib/mapLayers";
 import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -47,23 +48,40 @@ export default function EditorMap({
   cb.current = { onMapClick, onMovePoint, onDeletePoint, onMoveStop };
   const fitted = useRef(false);
 
-  useEffect(() => {
+    useEffect(() => {
     if (!el.current || map.current) return;
-    const m = L.map(el.current).setView(MACAPA_CENTER, 13);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: "&copy; OpenStreetMap",
-    }).addTo(m);
-    layer.current = L.layerGroup().addTo(m);
-    m.on("click", (e: L.LeafletMouseEvent) =>
-      cb.current.onMapClick([+e.latlng.lat.toFixed(6), +e.latlng.lng.toFixed(6)]),
-    );
-    map.current = m;
+
+    let isMounted = true;
+    const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+
+    const initMap = () => {
+      if (!isMounted || !el.current || map.current) return;
+
+      const m = L.map(el.current).setView(MACAPA_CENTER, 13);
+      createBaseLayers(m);
+
+      layer.current = L.layerGroup().addTo(m);
+
+      m.on("click", (e: L.LeafletMouseEvent) => {
+        onMapClickRef.current?.([e.latlng.lat, e.latlng.lng]);
+      });
+
+      map.current = m;
+    };
+
+    if (apiKey) {
+      loadGoogleMaps(apiKey).then(initMap).catch(initMap);
+    } else {
+      initMap();
+    }
+
     return () => {
-      m.remove();
+      isMounted = false;
+      map.current?.remove();
       map.current = null;
     };
   }, []);
+
 
   useEffect(() => {
     const lg = layer.current;
